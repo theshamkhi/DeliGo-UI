@@ -2,6 +2,7 @@ import {Client} from './client.model';
 import {Destinataire} from './destinataire.model';
 import {Livreur} from './livreur.model';
 
+
 export enum StatutColis {
   EN_ATTENTE = 'EN_ATTENTE',
   EN_TRANSIT = 'EN_TRANSIT',
