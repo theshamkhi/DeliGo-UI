@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -6,8 +6,17 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatGridListModule } from '@angular/material/grid-list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { ColisService } from '../../core/services/colis';
-import { ColisStatistics } from '../../core/models/statistics.model';
+import { ColisService } from '../../core/services/colis.service';
+import { AuthService } from '../../core/services/auth.service';
+
+interface DashboardStats {
+  total: number;
+  enAttente: number;
+  enTransit: number;
+  livres: number;
+  annules: number;
+  retournes: number;
+}
 
 @Component({
   selector: 'app-dashboard',
@@ -25,15 +34,15 @@ import { ColisStatistics } from '../../core/models/statistics.model';
     <div class="dashboard-container">
       <div class="dashboard-header">
         <h1>Tableau de Bord DeliGo</h1>
-        <p class="subtitle">Vue d'ensemble de votre activité de livraison</p>
+        <p class="subtitle">{{ getWelcomeMessage() }}</p>
       </div>
 
-      <!-- Statistics Cards -->
-      <div *ngIf="loading()" class="loading-container">
+      <!-- Statistics Cards (Only for Manager) -->
+      <div *ngIf="isManager() && loading()" class="loading-container">
         <mat-spinner></mat-spinner>
       </div>
 
-      <div *ngIf="!loading() && statistics()" class="stats-grid">
+      <div *ngIf="isManager() && !loading() && statistics()" class="stats-grid">
         <mat-card class="stat-card total">
           <mat-card-content>
             <div class="stat-icon">
@@ -107,11 +116,54 @@ import { ColisStatistics } from '../../core/models/statistics.model';
         </mat-card>
       </div>
 
-      <!-- Quick Actions -->
+      <!-- Quick Actions - Role Based -->
       <div class="quick-actions">
         <h2>Actions Rapides</h2>
         <div class="actions-grid">
-          <mat-card class="action-card" routerLink="/colis/new">
+          <!-- ✅ Client Actions -->
+          <mat-card *ngIf="isClient()" class="action-card" routerLink="/colis/new">
+            <mat-card-content>
+              <mat-icon>add_box</mat-icon>
+              <h3>Nouvelle Demande</h3>
+              <p>Créer une demande de livraison</p>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="isClient()" class="action-card" routerLink="/colis">
+            <mat-card-content>
+              <mat-icon>send</mat-icon>
+              <h3>Mes Envois</h3>
+              <p>Voir mes colis envoyés</p>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="isClient()" class="action-card" routerLink="/destinataires">
+            <mat-card-content>
+              <mat-icon>contacts</mat-icon>
+              <h3>Mes Destinataires</h3>
+              <p>Gérer mes destinataires</p>
+            </mat-card-content>
+          </mat-card>
+
+          <!-- ✅ Livreur Actions -->
+          <mat-card *ngIf="isLivreur()" class="action-card" routerLink="/colis">
+            <mat-card-content>
+              <mat-icon>local_shipping</mat-icon>
+              <h3>Ma Tournée</h3>
+              <p>Colis assignés à moi</p>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="isLivreur()" class="action-card" routerLink="/colis/tracking">
+            <mat-card-content>
+              <mat-icon>track_changes</mat-icon>
+              <h3>Suivi</h3>
+              <p>Suivre un colis</p>
+            </mat-card-content>
+          </mat-card>
+
+          <!-- ✅ Manager Actions -->
+          <mat-card *ngIf="isManager()" class="action-card" routerLink="/colis/new">
             <mat-card-content>
               <mat-icon>add_box</mat-icon>
               <h3>Nouveau Colis</h3>
@@ -119,7 +171,7 @@ import { ColisStatistics } from '../../core/models/statistics.model';
             </mat-card-content>
           </mat-card>
 
-          <mat-card class="action-card" routerLink="/clients/new">
+          <mat-card *ngIf="isManager()" class="action-card" routerLink="/clients/new">
             <mat-card-content>
               <mat-icon>person_add</mat-icon>
               <h3>Nouveau Client</h3>
@@ -127,7 +179,7 @@ import { ColisStatistics } from '../../core/models/statistics.model';
             </mat-card-content>
           </mat-card>
 
-          <mat-card class="action-card" routerLink="/destinataires/new">
+          <mat-card *ngIf="isManager()" class="action-card" routerLink="/destinataires/new">
             <mat-card-content>
               <mat-icon>contact_mail</mat-icon>
               <h3>Nouveau Destinataire</h3>
@@ -135,7 +187,7 @@ import { ColisStatistics } from '../../core/models/statistics.model';
             </mat-card-content>
           </mat-card>
 
-          <mat-card class="action-card" routerLink="/livreurs/new">
+          <mat-card *ngIf="isManager()" class="action-card" routerLink="/livreurs/new">
             <mat-card-content>
               <mat-icon>delivery_dining</mat-icon>
               <h3>Nouveau Livreur</h3>
@@ -143,7 +195,7 @@ import { ColisStatistics } from '../../core/models/statistics.model';
             </mat-card-content>
           </mat-card>
 
-          <mat-card class="action-card" routerLink="/colis">
+          <mat-card *ngIf="isManager()" class="action-card" routerLink="/colis">
             <mat-card-content>
               <mat-icon>list</mat-icon>
               <h3>Tous les Colis</h3>
@@ -151,6 +203,7 @@ import { ColisStatistics } from '../../core/models/statistics.model';
             </mat-card-content>
           </mat-card>
 
+          <!-- ✅ Common Action -->
           <mat-card class="action-card" routerLink="/colis/tracking">
             <mat-card-content>
               <mat-icon>track_changes</mat-icon>
@@ -161,8 +214,8 @@ import { ColisStatistics } from '../../core/models/statistics.model';
         </div>
       </div>
 
-      <!-- Management Links -->
-      <div class="management-links">
+      <!-- Management Links (Manager Only) -->
+      <div *ngIf="isManager()" class="management-links">
         <h2>Gestion</h2>
         <div class="links-grid">
           <mat-card class="link-card" routerLink="/clients">
@@ -368,18 +421,39 @@ import { ColisStatistics } from '../../core/models/statistics.model';
 })
 export class DashboardComponent implements OnInit {
   private colisService = inject(ColisService);
+  private authService = inject(AuthService);
 
-  statistics = signal<ColisStatistics | null>(null);
+  statistics = signal<DashboardStats | null>(null);
   loading = signal(false);
 
+  // Role computed signals
+  isManager = computed(() => this.authService.hasRole('ROLE_MANAGER'));
+  isLivreur = computed(() => this.authService.hasRole('ROLE_LIVREUR'));
+  isClient = computed(() => this.authService.hasRole('ROLE_CLIENT'));
+
   ngOnInit() {
-    this.loadStatistics();
+    // Only load statistics for managers
+    if (this.isManager()) {
+      this.loadStatistics();
+    }
   }
 
   loadStatistics() {
     this.loading.set(true);
-    this.colisService.getStatistics().subscribe({
-      next: (stats) => {
+
+    this.colisService.getAll({ page: 0, size: 1000 }).subscribe({
+      next: (response) => {
+        const colis = response.content;
+
+        const stats: DashboardStats = {
+          total: colis.length,
+          enAttente: colis.filter(c => c.statut === 'CREE' || c.statut === 'COLLECTE').length,
+          enTransit: colis.filter(c => c.statut === 'EN_TRANSIT' || c.statut === 'EN_STOCK').length,
+          livres: colis.filter(c => c.statut === 'LIVRE').length,
+          annules: colis.filter(c => c.statut === 'ANNULE').length,
+          retournes: colis.filter(c => c.statut === 'RETOURNE').length
+        };
+
         this.statistics.set(stats);
         this.loading.set(false);
       },
@@ -388,5 +462,19 @@ export class DashboardComponent implements OnInit {
         this.loading.set(false);
       }
     });
+  }
+
+  getWelcomeMessage(): string {
+    const user = this.authService.currentUser();
+    const name = user?.prenom || user?.username || 'Utilisateur';
+
+    if (this.isManager()) {
+      return `Bienvenue ${name} - Vue d'ensemble de votre activité de livraison`;
+    } else if (this.isLivreur()) {
+      return `Bienvenue ${name} - Gérez vos livraisons du jour`;
+    } else if (this.isClient()) {
+      return `Bienvenue ${name} - Suivez vos colis en temps réel`;
+    }
+    return 'Bienvenue sur DeliGo';
   }
 }
