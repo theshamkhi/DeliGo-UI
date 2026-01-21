@@ -4,7 +4,9 @@ import {Livreur} from './livreur.model';
 
 
 export enum StatutColis {
-  EN_ATTENTE = 'EN_ATTENTE',
+  CREE = 'CREE',
+  COLLECTE = 'COLLECTE',
+  EN_STOCK = 'EN_STOCK',
   EN_TRANSIT = 'EN_TRANSIT',
   LIVRE = 'LIVRE',
   ANNULE = 'ANNULE',
