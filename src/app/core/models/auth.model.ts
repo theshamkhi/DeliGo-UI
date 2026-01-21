@@ -1,5 +1,3 @@
-import {User} from './user.model';
-
 export interface LoginRequest {
   username: string;
   password: string;
@@ -16,7 +14,14 @@ export interface RegisterRequest {
 }
 
 export interface AuthResponse {
-  token: string;
+  accessToken: string;
   refreshToken: string;
-  user: User;
+  type: string;
+  id: string;
+  username: string;
+  email: string;
+  nom: string;
+  prenom: string;
+  roles: string[];
+  permissions: string[];
 }
