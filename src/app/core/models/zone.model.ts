@@ -1,7 +1,7 @@
 export interface Zone {
   id?: string;
   nom: string;
-  description: string;
+  ville: string;
   codePostal: string;
   dateCreation?: Date;
   dateModification?: Date;
