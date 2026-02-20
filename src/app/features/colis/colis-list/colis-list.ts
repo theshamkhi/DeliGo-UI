@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -14,14 +14,26 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatSelectModule } from '@angular/material/select';
 import { MatMenuModule } from '@angular/material/menu';
-import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { ColisService } from '../../../core/services/colis.service';
+import { MatDialogModule } from '@angular/material/dialog';
+import { Store } from '@ngrx/store';
+import { Observable, Subject } from 'rxjs';
+import { debounceTime, takeUntil } from 'rxjs/operators';
+import { AppState } from '../../../store';
+import { ColisActions } from '../../../store/colis/colis.actions';
+import {
+  selectFilteredColis,
+  selectColisLoading,
+  selectTotalElements,
+  selectStatusFilter,
+  selectCurrentPage
+} from '../../../store/colis/colis.selectors';
+import {
+  selectIsManager,
+  selectIsLivreur,
+  selectIsClient
+} from '../../../store/auth/auth.selectors';
 import { LivreurService } from '../../../core/services/livreur.service';
-import { AuthService } from '../../../core/services/auth.service';
 import { Colis, StatutColis, PrioriteColis } from '../../../core/models/colis.model';
-import { Livreur } from '../../../core/models/livreur.model';
-import { PageResponse } from '../../../core/models/pagination.model';
-import { debounceTime, Subject } from 'rxjs';
 
 @Component({
   selector: 'app-colis-list',
@@ -50,13 +62,13 @@ import { debounceTime, Subject } from 'rxjs';
         <mat-card-header>
           <mat-card-title>
             <div class="header-content">
-              <h2>{{ getTitle() }}</h2>
-              <button *ngIf="canCreateColis()"
+              <h2>{{ getTitle() | async }}</h2>
+              <button *ngIf="canCreateColis$ | async"
                       mat-raised-button
                       color="primary"
                       routerLink="/colis/new">
                 <mat-icon>add</mat-icon>
-                {{ isClient() ? 'Nouvelle Demande' : 'Nouveau Colis' }}
+                {{ (isClient$ | async) ? 'Nouvelle Demande' : 'Nouveau Colis' }}
               </button>
             </div>
           </mat-card-title>
@@ -73,28 +85,28 @@ import { debounceTime, Subject } from 'rxjs';
               <mat-icon matSuffix>search</mat-icon>
             </mat-form-field>
 
-            <mat-form-field *ngIf="isManager()" appearance="outline" class="status-filter">
+            <mat-form-field *ngIf="isManager$ | async" appearance="outline" class="status-filter">
               <mat-label>Filtrer par statut</mat-label>
-              <mat-select [(ngModel)]="statusFilter" (selectionChange)="onFilterChange()">
+              <mat-select [value]="statusFilter$ | async" (selectionChange)="onFilterChange($event.value)">
                 <mat-option [value]="null">Tous</mat-option>
-                <mat-option [value]="'CREE'">Créé</mat-option>
-                <mat-option [value]="'COLLECTE'">Collecté</mat-option>
-                <mat-option [value]="'EN_STOCK'">En Stock</mat-option>
-                <mat-option [value]="'EN_TRANSIT'">En Transit</mat-option>
-                <mat-option [value]="'LIVRE'">Livré</mat-option>
-                <mat-option [value]="'ANNULE'">Annulé</mat-option>
-                <mat-option [value]="'RETOURNE'">Retourné</mat-option>
+                <mat-option value="CREE">Créé</mat-option>
+                <mat-option value="COLLECTE">Collecté</mat-option>
+                <mat-option value="EN_STOCK">En Stock</mat-option>
+                <mat-option value="EN_TRANSIT">En Transit</mat-option>
+                <mat-option value="LIVRE">Livré</mat-option>
+                <mat-option value="ANNULE">Annulé</mat-option>
+                <mat-option value="RETOURNE">Retourné</mat-option>
               </mat-select>
             </mat-form-field>
           </div>
 
-          <div *ngIf="loading()" class="loading-container">
+          <div *ngIf="loading$ | async" class="loading-container">
             <mat-spinner></mat-spinner>
           </div>
 
-          <div *ngIf="!loading()" class="table-container">
-            <table mat-table [dataSource]="colis()" class="mat-elevation-z2">
-              <!-- Tracking ID Column (for copying) -->
+          <div *ngIf="!(loading$ | async)" class="table-container">
+            <table mat-table [dataSource]="(colis$ | async) || []" class="mat-elevation-z2">
+              <!-- Tracking ID Column -->
               <ng-container matColumnDef="id">
                 <th mat-header-cell *matHeaderCellDef>N° Suivi</th>
                 <td mat-cell *matCellDef="let col">
@@ -173,7 +185,7 @@ import { debounceTime, Subject } from 'rxjs';
                   </button>
 
                   <!-- Livreur can update status -->
-                  <button *ngIf="isLivreur()"
+                  <button *ngIf="isLivreur$ | async"
                           mat-icon-button
                           [matMenuTriggerFor]="statusMenuLivreur"
                           matTooltip="Mettre à jour"
@@ -196,7 +208,7 @@ import { debounceTime, Subject } from 'rxjs';
                   </mat-menu>
 
                   <!-- Manager can do everything -->
-                  <button *ngIf="isManager()"
+                  <button *ngIf="isManager$ | async"
                           mat-icon-button
                           [matMenuTriggerFor]="statusMenuManager"
                           matTooltip="Changer statut"
@@ -235,7 +247,7 @@ import { debounceTime, Subject } from 'rxjs';
                   </mat-menu>
 
                   <!-- Manager: Assign Livreur -->
-                  <button *ngIf="isManager() && !col.livreurNom"
+                  <button *ngIf="(isManager$ | async) && !col.livreurNom"
                           mat-icon-button
                           (click)="openAssignDialog(col)"
                           matTooltip="Assigner un livreur"
@@ -244,14 +256,14 @@ import { debounceTime, Subject } from 'rxjs';
                   </button>
 
                   <!-- Manager: Edit & Delete -->
-                  <button *ngIf="isManager()"
+                  <button *ngIf="isManager$ | async"
                           mat-icon-button
                           [routerLink]="['/colis', col.id, 'edit']"
                           matTooltip="Modifier"
                           color="accent">
                     <mat-icon>edit</mat-icon>
                   </button>
-                  <button *ngIf="isManager()"
+                  <button *ngIf="isManager$ | async"
                           mat-icon-button
                           (click)="deleteColis(col)"
                           matTooltip="Supprimer"
@@ -261,11 +273,11 @@ import { debounceTime, Subject } from 'rxjs';
                 </td>
               </ng-container>
 
-              <tr mat-header-row *matHeaderRowDef="displayedColumns()"></tr>
-              <tr mat-row *matRowDef="let row; columns: displayedColumns();"></tr>
+              <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+              <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
 
               <tr class="mat-row" *matNoDataRow>
-                <td class="mat-cell" [colSpan]="displayedColumns().length">
+                <td class="mat-cell" [colSpan]="displayedColumns.length">
                   <div class="no-data">
                     <mat-icon>inbox</mat-icon>
                     <p>Aucun colis trouvé</p>
@@ -276,11 +288,11 @@ import { debounceTime, Subject } from 'rxjs';
           </div>
 
           <mat-paginator
-            *ngIf="!loading() && pageResponse()"
-            [length]="pageResponse()?.totalElements || 0"
+            *ngIf="!(loading$ | async)"
+            [length]="totalElements$ | async"
             [pageSize]="pageSize"
             [pageSizeOptions]="[10, 20, 50, 100]"
-            [pageIndex]="currentPage"
+            [pageIndex]="currentPage$ | async"
             (page)="onPageChange($event)"
             showFirstLastButtons>
           </mat-paginator>
@@ -387,133 +399,137 @@ import { debounceTime, Subject } from 'rxjs';
     }
   `]
 })
-export class ColisListComponent implements OnInit {
-  private colisService = inject(ColisService);
+export class ColisListComponent implements OnInit, OnDestroy {
+  private store = inject(Store<AppState>);
   private livreurService = inject(LivreurService);
-  private authService = inject(AuthService);
-  private dialog = inject(MatDialog);
+  private destroy$ = new Subject<void>();
 
-  colis = signal<Colis[]>([]);
-  pageResponse = signal<PageResponse<Colis> | null>(null);
-  loading = signal(false);
+  // Observables from store
+  colis$: Observable<Colis[]> = this.store.select(selectFilteredColis);
+  loading$: Observable<boolean> = this.store.select(selectColisLoading);
+  totalElements$: Observable<number> = this.store.select(selectTotalElements);
+  statusFilter$: Observable<StatutColis | null> = this.store.select(selectStatusFilter);
+  currentPage$: Observable<number> = this.store.select(selectCurrentPage);
 
-  currentPage = 0;
+  isManager$: Observable<boolean> = this.store.select(selectIsManager);
+  isLivreur$: Observable<boolean> = this.store.select(selectIsLivreur);
+  isClient$: Observable<boolean> = this.store.select(selectIsClient);
+
+  canCreateColis$: Observable<boolean> | undefined;
+
   pageSize = 20;
   searchKeyword = '';
-  statusFilter: StatutColis | null = null;
+  displayedColumns: string[] = [];
 
   private searchSubject = new Subject<string>();
 
-  // Role checks
-  isManager = computed(() => this.authService.hasRole('ROLE_MANAGER'));
-  isLivreur = computed(() => this.authService.hasRole('ROLE_LIVREUR'));
-  isClient = computed(() => this.authService.hasRole('ROLE_CLIENT'));
-
-  displayedColumns = computed(() => {
-    if (this.isManager()) {
-      return ['id', 'description', 'expediteur', 'destinataire', 'ville', 'poids', 'priorite', 'statut', 'livreur', 'actions'];
-    } else if (this.isLivreur()) {
-      return ['id', 'description', 'destinataire', 'ville', 'poids', 'priorite', 'statut', 'actions'];
-    } else { // Client
-      return ['id', 'description', 'destinataire', 'ville', 'poids', 'priorite', 'statut', 'actions'];
-    }
-  });
-
   ngOnInit() {
-    this.loadColis();
-
-    this.searchSubject.pipe(
-      debounceTime(300)
-    ).subscribe(keyword => {
-      this.currentPage = 0;
-      if (keyword.trim()) {
-        this.searchColis(keyword);
+    // Set displayed columns based on role
+    this.isManager$.pipe(takeUntil(this.destroy$)).subscribe(isManager => {
+      if (isManager) {
+        this.displayedColumns = ['id', 'description', 'expediteur', 'destinataire', 'ville', 'poids', 'priorite', 'statut', 'livreur', 'actions'];
       } else {
-        this.loadColis();
+        this.displayedColumns = ['id', 'description', 'destinataire', 'ville', 'poids', 'priorite', 'statut', 'actions'];
       }
     });
+
+    // Load initial data
+    this.loadColis();
+
+    // Setup search debounce
+    this.searchSubject
+      .pipe(
+        debounceTime(300),
+        takeUntil(this.destroy$)
+      )
+      .subscribe(keyword => {
+        if (keyword.trim()) {
+          this.searchColis(keyword);
+        } else {
+          this.loadColis();
+        }
+      });
+
+    // Can create colis if Manager or Client
+    this.canCreateColis$ = this.store.select(state => {
+      const isManager = selectIsManager(state);
+      const isClient = selectIsClient(state);
+      return isManager || isClient;
+    });
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   loadColis() {
-    this.loading.set(true);
-
-    const pageRequest = {
-      page: this.currentPage,
-      size: this.pageSize,
-      sort: 'dateCreation,desc'
-    };
-
-    this.colisService.getAll(pageRequest).subscribe({
-      next: (response) => {
-        let filteredContent = response.content;
-
-        if (this.statusFilter && this.isManager()) {
-          filteredContent = filteredContent.filter(c => c.statut === this.statusFilter);
+    this.store.dispatch(
+      ColisActions.loadColis({
+        pageRequest: {
+          page: 0,
+          size: this.pageSize,
+          sort: 'dateCreation,desc'
         }
-
-        this.pageResponse.set(response);
-        this.colis.set(filteredContent);
-        this.loading.set(false);
-      },
-      error: (error) => {
-        console.error('Error loading colis:', error);
-        this.loading.set(false);
-      }
-    });
+      })
+    );
   }
 
   searchColis(keyword: string) {
-    this.loading.set(true);
-    this.colisService.search(keyword, {
-      page: this.currentPage,
-      size: this.pageSize
-    }).subscribe({
-      next: (response) => {
-        this.pageResponse.set(response);
-        this.colis.set(response.content);
-        this.loading.set(false);
-      },
-      error: (error) => {
-        console.error('Error searching colis:', error);
-        this.loading.set(false);
-      }
-    });
+    this.store.dispatch(
+      ColisActions.searchColis({
+        keyword,
+        pageRequest: {
+          page: 0,
+          size: this.pageSize
+        }
+      })
+    );
   }
 
   onSearchChange(keyword: string) {
     this.searchSubject.next(keyword);
   }
 
-  onFilterChange() {
-    this.currentPage = 0;
-    this.loadColis();
+  onFilterChange(status: StatutColis | null) {
+    this.store.dispatch(ColisActions.setStatusFilter({ status }));
   }
 
   onPageChange(event: PageEvent) {
-    this.currentPage = event.pageIndex;
-    this.pageSize = event.pageSize;
+    const pageRequest = {
+      page: event.pageIndex,
+      size: event.pageSize,
+      sort: 'dateCreation,desc'
+    };
 
     if (this.searchKeyword.trim()) {
-      this.searchColis(this.searchKeyword);
+      this.store.dispatch(
+        ColisActions.searchColis({
+          keyword: this.searchKeyword,
+          pageRequest
+        })
+      );
     } else {
-      this.loadColis();
+      this.store.dispatch(ColisActions.loadColis({ pageRequest }));
     }
   }
 
-  updateStatus(col: Colis, newStatus: string) {
-    this.colisService.updateStatus(col.id!, newStatus).subscribe({
-      next: () => {
-        this.loadColis();
-      },
-      error: (error) => {
-        console.error('Error updating status:', error);
-        alert('Erreur lors de la mise à jour du statut');
-      }
-    });
+  updateStatus(colis: Colis, newStatus: string) {
+    this.store.dispatch(
+      ColisActions.updateStatus({
+        id: colis.id!,
+        statut: newStatus as StatutColis
+      })
+    );
   }
 
-  openAssignDialog(col: Colis) {
-    // Load active livreurs
+  deleteColis(colis: Colis) {
+    if (confirm('Êtes-vous sûr de vouloir supprimer ce colis?')) {
+      this.store.dispatch(ColisActions.deleteColis({ id: colis.id! }));
+    }
+  }
+
+  openAssignDialog(colis: Colis) {
     this.livreurService.getActive().subscribe({
       next: (livreurs) => {
         const selectedLivreur = prompt(
@@ -523,7 +539,12 @@ export class ColisListComponent implements OnInit {
         if (selectedLivreur) {
           const index = parseInt(selectedLivreur) - 1;
           if (index >= 0 && index < livreurs.length) {
-            this.assignLivreur(col.id!, livreurs[index].id!);
+            this.store.dispatch(
+              ColisActions.assignLivreur({
+                colisId: colis.id!,
+                livreurId: livreurs[index].id!
+              })
+            );
           }
         }
       },
@@ -534,51 +555,22 @@ export class ColisListComponent implements OnInit {
     });
   }
 
-  assignLivreur(colisId: string, livreurId: string) {
-    this.colisService.assignLivreur(colisId, livreurId).subscribe({
-      next: () => {
-        this.loadColis();
-      },
-      error: (error) => {
-        console.error('Error assigning livreur:', error);
-        alert('Erreur lors de l\'assignation du livreur');
-      }
-    });
-  }
-
-  deleteColis(col: Colis) {
-    if (confirm(`Êtes-vous sûr de vouloir supprimer ce colis?`)) {
-      this.colisService.delete(col.id!).subscribe({
-        next: () => {
-          this.loadColis();
-        },
-        error: (error) => {
-          console.error('Error deleting colis:', error);
-          alert('Erreur lors de la suppression du colis');
-        }
-      });
-    }
-  }
-
   copyTrackingId(id: string | undefined) {
     if (!id) return;
 
-    navigator.clipboard.writeText(id).then(() => {
-      alert('Numéro de suivi copié!');
-    }).catch(() => {
-      alert('Erreur lors de la copie');
+    navigator.clipboard.writeText(id).then(
+      () => alert('Numéro de suivi copié!'),
+      () => alert('Erreur lors de la copie')
+    );
+  }
+
+  getTitle(): Observable<string> {
+    return this.store.select(state => {
+      if (selectIsManager(state)) return 'Liste des Colis';
+      if (selectIsLivreur(state)) return 'Mes Livraisons';
+      if (selectIsClient(state)) return 'Mes Envois';
+      return 'Colis';
     });
-  }
-
-  canCreateColis(): boolean {
-    return this.isManager() || this.isClient();
-  }
-
-  getTitle(): string {
-    if (this.isManager()) return 'Liste des Colis';
-    if (this.isLivreur()) return 'Mes Livraisons';
-    if (this.isClient()) return 'Mes Envois';
-    return 'Colis';
   }
 
   getStatusClass(status?: StatutColis): string {
