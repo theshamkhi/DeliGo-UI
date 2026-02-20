@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, effect } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { MatToolbarModule } from '@angular/material/toolbar';
@@ -9,7 +9,19 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatDividerModule } from '@angular/material/divider';
-import { AuthService } from './core/services/auth.service';
+import { Store } from '@ngrx/store';
+import { Observable } from 'rxjs';
+import { AppState } from './store';
+import { AuthActions } from './store/auth/auth.actions';
+import {
+  selectIsAuthenticated,
+  selectCurrentUser,
+  selectUserFullName,
+  selectIsManager,
+  selectIsLivreur,
+  selectIsClient,
+  selectUserRoles
+} from './store/auth/auth.selectors';
 import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loading-spinner';
 
 @Component({
@@ -29,13 +41,13 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
     LoadingSpinnerComponent
   ],
   template: `
-    @if (authService.isAuthenticated()) {
+    @if (isAuthenticated$ | async) {
       <div class="app-container">
         <mat-sidenav-container class="sidenav-container">
           <mat-sidenav #sidenav mode="side" opened class="sidenav">
             <div class="logo-container">
               <h2>🚚 DeliGo</h2>
-              <p class="user-role">{{ getUserRoleLabel() }}</p>
+              <p class="user-role">{{ getUserRoleLabel() | async }}</p>
             </div>
 
             <mat-nav-list>
@@ -51,11 +63,11 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
               <a mat-list-item routerLink="/colis" routerLinkActive="active">
                 <mat-icon matListItemIcon>inventory_2</mat-icon>
                 <span matListItemTitle>
-                  {{ getColisLabel() }}
+                  {{ getColisLabel() | async }}
                 </span>
               </a>
 
-              @if (authService.hasRole('ROLE_MANAGER')) {
+              @if (isManager$ | async) {
                 <a mat-list-item routerLink="/clients" routerLinkActive="active">
                   <mat-icon matListItemIcon>people</mat-icon>
                   <span matListItemTitle>Clients</span>
@@ -65,11 +77,11 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
               <a mat-list-item routerLink="/destinataires" routerLinkActive="active">
                 <mat-icon matListItemIcon>contacts</mat-icon>
                 <span matListItemTitle>
-                  {{ getDestinataireLabel() }}
+                  {{ getDestinataireLabel() | async }}
                 </span>
               </a>
 
-              @if (authService.hasRole('ROLE_MANAGER')) {
+              @if (isManager$ | async) {
                 <a mat-list-item routerLink="/livreurs" routerLinkActive="active">
                   <mat-icon matListItemIcon>local_shipping</mat-icon>
                   <span matListItemTitle>Livreurs</span>
@@ -85,7 +97,7 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
                 <span matListItemTitle>Produits</span>
               </a>
 
-              @if (authService.hasRole('ROLE_MANAGER')) {
+              @if (isManager$ | async) {
                 <a mat-list-item routerLink="/zones" routerLinkActive="active">
                   <mat-icon matListItemIcon>map</mat-icon>
                   <span matListItemTitle>Zones</span>
@@ -143,10 +155,10 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
                     <mat-icon>account_circle</mat-icon>
                   </div>
                   <div class="user-details">
-                    <div class="user-name">{{ getUserFullName() }}</div>
-                    <div class="user-email">{{ authService.currentUser()?.email }}</div>
+                    <div class="user-name">{{ userFullName$ | async }}</div>
+                    <div class="user-email">{{ (currentUser$ | async)?.email }}</div>
                     <div class="user-roles" style="font-size: 11px; color: rgba(0,0,0,0.5); margin-top: 4px;">
-                      Rôles: {{ getUserRoles() }}
+                      Rôles: {{ getUserRolesString() | async }}
                     </div>
                   </div>
                 </div>
@@ -175,7 +187,7 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
       </div>
     }
 
-    @if (!authService.isAuthenticated()) {
+    @if (!(isAuthenticated$ | async)) {
       <div>
         <router-outlet></router-outlet>
       </div>
@@ -338,92 +350,65 @@ import { LoadingSpinnerComponent } from './shared/components/loading-spinner/loa
   `]
 })
 export class App implements OnInit {
-  authService = inject(AuthService);
+  private store = inject(Store<AppState>);
   private router = inject(Router);
 
-  constructor() {
-    effect(() => {
-      const isAuth = this.authService.isAuthenticated();
-      const user = this.authService.currentUser();
-
-      console.log('Auth state changed:', {
-        isAuthenticated: isAuth,
-        user: user,
-        roles: user?.roleNames
-      });
-    });
-  }
+  // Selectors
+  isAuthenticated$ = this.store.select(selectIsAuthenticated);
+  currentUser$ = this.store.select(selectCurrentUser);
+  userFullName$ = this.store.select(selectUserFullName);
+  isManager$ = this.store.select(selectIsManager);
+  isLivreur$ = this.store.select(selectIsLivreur);
+  isClient$ = this.store.select(selectIsClient);
 
   ngOnInit() {
-    if (this.authService.isLoggedIn()) {
-      const currentUser = this.authService.currentUser();
-
-      // Check if user data exists and has roles
-      if (!currentUser || !currentUser.roleNames || currentUser.roleNames.length === 0) {
-        console.log('User logged in but no role data, fetching profile...');
-        this.authService.getProfile().subscribe({
-          next: (user) => {
-            console.log('Profile loaded successfully:', user);
-          },
-          error: (error) => {
-            console.error('Error loading profile:', error);
-          }
-        });
-      } else {
-        console.log('User already loaded with roles:', currentUser.roleNames);
-      }
-    }
+    // Restore session from localStorage on app init
+    this.store.dispatch(AuthActions.restoreSession());
   }
 
-  getUserFullName(): string {
-    const user = this.authService.currentUser();
-    if (user) {
-      return `${user.prenom} ${user.nom}`;
-    }
-    return 'Utilisateur';
+  getUserRoleLabel(): Observable<string> {
+    return this.store.select(selectUserRoles).pipe(
+      map(roles => {
+        if (roles.includes('ROLE_MANAGER')) return 'Manager';
+        if (roles.includes('ROLE_LIVREUR')) return 'Livreur';
+        if (roles.includes('ROLE_CLIENT')) return 'Client';
+        return 'Utilisateur';
+      })
+    );
   }
 
-  getUserRoleLabel(): string {
-    const roles = this.authService.getUserRoles();
-    console.log('Getting role label for:', roles);
-
-    if (roles.includes('ROLE_MANAGER')) {
-      return 'Manager';
-    } else if (roles.includes('ROLE_LIVREUR')) {
-      return 'Livreur';
-    } else if (roles.includes('ROLE_CLIENT')) {
-      return 'Client';
-    }
-    return 'Utilisateur';
+  getUserRolesString(): Observable<string> {
+    return this.store.select(selectUserRoles).pipe(
+      map(roles => roles.join(', '))
+    );
   }
 
-  getUserRoles(): string {
-    return this.authService.getUserRoles().join(', ');
+  getColisLabel(): Observable<string> {
+    return this.store.select(selectUserRoles).pipe(
+      map(roles => {
+        if (roles.includes('ROLE_MANAGER')) return 'Tous les Colis';
+        if (roles.includes('ROLE_LIVREUR')) return 'Mes Livraisons';
+        if (roles.includes('ROLE_CLIENT')) return 'Mes Colis';
+        return 'Colis';
+      })
+    );
   }
 
-  getColisLabel(): string {
-    if (this.authService.hasRole('ROLE_MANAGER')) {
-      return 'Tous les Colis';
-    } else if (this.authService.hasRole('ROLE_LIVREUR')) {
-      return 'Mes Livraisons';
-    } else if (this.authService.hasRole('ROLE_CLIENT')) {
-      return 'Mes Colis';
-    }
-    return 'Colis';
-  }
-
-  getDestinataireLabel(): string {
-    if (this.authService.hasRole('ROLE_MANAGER')) {
-      return 'Destinataires';
-    } else if (this.authService.hasRole('ROLE_CLIENT')) {
-      return 'Mes Destinataires';
-    }
-    return 'Destinataires';
+  getDestinataireLabel(): Observable<string> {
+    return this.store.select(selectUserRoles).pipe(
+      map(roles => {
+        if (roles.includes('ROLE_MANAGER')) return 'Destinataires';
+        if (roles.includes('ROLE_CLIENT')) return 'Mes Destinataires';
+        return 'Destinataires';
+      })
+    );
   }
 
   logout(): void {
     if (confirm('Êtes-vous sûr de vouloir vous déconnecter?')) {
-      this.authService.logout();
+      this.store.dispatch(AuthActions.logout());
     }
   }
 }
+
+import { map } from 'rxjs/operators';
